@@ -57,8 +57,21 @@ function detectVariantFromPage() {
     // Method 3: Check game metadata in round__app div
     const roundApp = document.querySelector('.round__app');
     if (roundApp) {
-        for (const [lichessName, engineName] of Object.entries(LICHESS_VARIANT_MAP)) {
-            if (roundApp.classList.contains(`variant-${lichessName.toLowerCase()}`)) {
+        // Check for variant classes like 'variant-crazyhouse', 'variant-atomic', etc.
+        const variantClassMap = {
+            'variant-standard': 'chess',
+            'variant-chess960': 'fischerandom',
+            'variant-crazyhouse': 'crazyhouse',
+            'variant-kingofthehill': 'kingofthehill',
+            'variant-threecheck': '3check',
+            'variant-antichess': 'antichess',
+            'variant-atomic': 'atomic',
+            'variant-horde': 'horde',
+            'variant-racingkings': 'racingkings'
+        };
+        
+        for (const [className, engineName] of Object.entries(variantClassMap)) {
+            if (roundApp.classList.contains(className)) {
                 return engineName;
             }
         }

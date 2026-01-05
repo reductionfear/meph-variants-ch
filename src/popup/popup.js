@@ -12,6 +12,32 @@ let turn = ''; // 'w' | 'b'
 let currentVariant = 'chess';  // Track current detected variant
 let engineInitialized = false;
 
+// Variant display name mapping
+const VARIANT_DISPLAY_NAMES = {
+    'chess': 'Standard Chess',
+    'fischerandom': 'Chess960',
+    'crazyhouse': 'Crazyhouse',
+    'kingofthehill': 'King of the Hill',
+    '3check': 'Three-Check',
+    'antichess': 'Antichess',
+    'atomic': 'Atomic',
+    'horde': 'Horde',
+    'racingkings': 'Racing Kings'
+};
+
+// Variant NNUE model mapping
+const VARIANT_NNUE_MAP = {
+    'chess': 'nn-46832cfbead3.nnue',
+    'fischerandom': 'nn-46832cfbead3.nnue',
+    'crazyhouse': 'crazyhouse-8ebf84784ad2.nnue',
+    'kingofthehill': 'kingofthehill-978b86d0e6a4.nnue',
+    '3check': '3check-cb5f517c228b.nnue',
+    'antichess': 'antichess-dd3cbe53cd4e.nnue',
+    'atomic': 'atomic-2cf13ff256cc.nnue',
+    'horde': 'horde-28173ddccabe.nnue',
+    'racingkings': 'racingkings-636b95f085e3.nnue',
+};
+
 document.addEventListener('DOMContentLoaded', async function () {
     // load extension configurations from localStorage
     const computeTime = JSON.parse(localStorage.getItem('compute_time'));
@@ -151,18 +177,7 @@ async function initialize_engine() {
                     const nnue_responses = await Promise.all(nnues.map(nnue => fetch(`${engineBasePath}/${nnue}`)));
                     return await Promise.all(nnue_responses.map(res => res.arrayBuffer()));
                 } else {
-                    const variantNnueMap = {
-                        'chess': 'nn-46832cfbead3.nnue',
-                        'fischerandom': 'nn-46832cfbead3.nnue',
-                        'crazyhouse': 'crazyhouse-8ebf84784ad2.nnue',
-                        'kingofthehill': 'kingofthehill-978b86d0e6a4.nnue',
-                        '3check': '3check-cb5f517c228b.nnue',
-                        'antichess': 'antichess-dd3cbe53cd4e.nnue',
-                        'atomic': 'atomic-2cf13ff256cc.nnue',
-                        'horde': 'horde-28173ddccabe.nnue',
-                        'racingkings': 'racingkings-636b95f085e3.nnue',
-                    };
-                    const variantNnue = variantNnueMap[config.variant];
+                    const variantNnue = VARIANT_NNUE_MAP[config.variant];
                     const nnue_response = await fetch(`${engineBasePath}/nnue/${variantNnue}`);
                     return [await nnue_response.arrayBuffer()];
                 }
@@ -240,19 +255,7 @@ async function handleVariantChange(variant) {
 }
 
 function updateVariantDisplay(variant) {
-    const variantDisplayNames = {
-        'chess': 'Standard Chess',
-        'fischerandom': 'Chess960',
-        'crazyhouse': 'Crazyhouse',
-        'kingofthehill': 'King of the Hill',
-        '3check': 'Three-Check',
-        'antichess': 'Antichess',
-        'atomic': 'Atomic',
-        'horde': 'Horde',
-        'racingkings': 'Racing Kings'
-    };
-    
-    const displayName = variantDisplayNames[variant] || variant;
+    const displayName = VARIANT_DISPLAY_NAMES[variant] || variant;
     const gameDetectionElem = document.getElementById('game-detection');
     if (gameDetectionElem) {
         const currentText = gameDetectionElem.innerText;
@@ -283,19 +286,8 @@ async function reloadVariantNnue(variant) {
     if (config.engine !== 'fairy-stockfish-14-nnue') return;
     
     const engineBasePath = '/lib/engine/fairy-stockfish-14';
-    const variantNnueMap = {
-        'chess': 'nn-46832cfbead3.nnue',
-        'fischerandom': 'nn-46832cfbead3.nnue',
-        'crazyhouse': 'crazyhouse-8ebf84784ad2.nnue',
-        'kingofthehill': 'kingofthehill-978b86d0e6a4.nnue',
-        '3check': '3check-cb5f517c228b.nnue',
-        'antichess': 'antichess-dd3cbe53cd4e.nnue',
-        'atomic': 'atomic-2cf13ff256cc.nnue',
-        'horde': 'horde-28173ddccabe.nnue',
-        'racingkings': 'racingkings-636b95f085e3.nnue',
-    };
+    const variantNnue = VARIANT_NNUE_MAP[variant];
     
-    const variantNnue = variantNnueMap[variant];
     if (!variantNnue) {
         console.error(`No NNUE model found for variant: ${variant}`);
         return;

@@ -257,7 +257,7 @@ html, body {
 .variant-badge.crazyhouse { background-color: #9c27b0; }
 .variant-badge.atomic { background-color: #f44336; }
 .variant-badge.kingofthehill { background-color: #ff9800; }
-.variant-badge.threecheck { background-color: #2196f3; }
+.variant-badge.\33 check { background-color: #2196f3; } /* CSS escaping for '3check' */
 .variant-badge.antichess { background-color: #607d8b; }
 .variant-badge.horde { background-color: #795548; }
 .variant-badge.racingkings { background-color: #4caf50; }
