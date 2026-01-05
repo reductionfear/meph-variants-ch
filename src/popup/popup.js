@@ -9,6 +9,8 @@ let is_calculating = false;
 let prog = 0;
 let last_eval = {fen: '', activeLines: 0, lines: []};
 let turn = ''; // 'w' | 'b'
+let currentVariant = 'chess';  // Track current detected variant
+let engineInitialized = false;
 
 document.addEventListener('DOMContentLoaded', async function () {
     // load extension configurations from localStorage
@@ -61,13 +63,22 @@ document.addEventListener('DOMContentLoaded', async function () {
 
     // init engine webworker
     await initialize_engine();
+    engineInitialized = true;
 
     // listen to messages from content-script
-    chrome.runtime.onMessage.addListener(function (response) {
+    chrome.runtime.onMessage.addListener(async function (response) {
         if (response.fenresponse && response.dom !== 'no') {
             if (board.orientation() !== response.orient) {
                 board.orientation(response.orient);
             }
+            
+            // Handle variant change
+            const detectedVariant = response.detectedVariant || 'chess';
+            if (detectedVariant !== currentVariant) {
+                currentVariant = detectedVariant;
+                await handleVariantChange(detectedVariant);
+            }
+            
             const {fen, startFen, moves} = parse_position_from_response(response.dom);
             if (last_eval.fen !== fen) {
                 on_new_pos(fen, startFen, moves);
@@ -200,6 +211,109 @@ async function initialize_engine() {
         send_engine_uci('isready');
     }
     console.log('Engine ready!', engine);
+}
+
+async function handleVariantChange(variant) {
+    console.log(`Variant changed to: ${variant}`);
+    
+    // Update config variant
+    config.variant = variant;
+    
+    // Determine if we need Fairy Stockfish
+    const needsFairyStockfish = variant !== 'chess' && variant !== 'fischerandom';
+    const currentEngine = config.engine;
+    
+    if (needsFairyStockfish && currentEngine !== 'fairy-stockfish-14-nnue') {
+        // Switch to Fairy Stockfish
+        config.engine = 'fairy-stockfish-14-nnue';
+        await reinitialize_engine();
+    } else if (needsFairyStockfish && currentEngine === 'fairy-stockfish-14-nnue') {
+        // Already on Fairy Stockfish, just reload NNUE for new variant
+        await reloadVariantNnue(variant);
+    } else if (!needsFairyStockfish && currentEngine === 'fairy-stockfish-14-nnue') {
+        // Can switch back to regular Stockfish for standard chess
+        // Optional: keep Fairy Stockfish or switch back
+    }
+    
+    // Update display to show detected variant
+    updateVariantDisplay(variant);
+}
+
+function updateVariantDisplay(variant) {
+    const variantDisplayNames = {
+        'chess': 'Standard Chess',
+        'fischerandom': 'Chess960',
+        'crazyhouse': 'Crazyhouse',
+        'kingofthehill': 'King of the Hill',
+        '3check': 'Three-Check',
+        'antichess': 'Antichess',
+        'atomic': 'Atomic',
+        'horde': 'Horde',
+        'racingkings': 'Racing Kings'
+    };
+    
+    const displayName = variantDisplayNames[variant] || variant;
+    const gameDetectionElem = document.getElementById('game-detection');
+    if (gameDetectionElem) {
+        const currentText = gameDetectionElem.innerText;
+        const siteInfo = currentText.split(' - ')[0] || currentText;
+        gameDetectionElem.innerText = `${siteInfo} - ${displayName}`;
+    }
+}
+
+async function reinitialize_engine() {
+    // Stop current engine
+    if (engine) {
+        send_engine_uci('quit');
+        if (engine instanceof Worker) {
+            engine.terminate();
+        }
+        engine = null;
+    }
+    
+    // Clear evaluation state
+    last_eval = {fen: '', activeLines: 0, lines: []};
+    toggle_calculating(false);
+    
+    // Initialize new engine
+    await initialize_engine();
+}
+
+async function reloadVariantNnue(variant) {
+    if (config.engine !== 'fairy-stockfish-14-nnue') return;
+    
+    const engineBasePath = '/lib/engine/fairy-stockfish-14';
+    const variantNnueMap = {
+        'chess': 'nn-46832cfbead3.nnue',
+        'fischerandom': 'nn-46832cfbead3.nnue',
+        'crazyhouse': 'crazyhouse-8ebf84784ad2.nnue',
+        'kingofthehill': 'kingofthehill-978b86d0e6a4.nnue',
+        '3check': '3check-cb5f517c228b.nnue',
+        'antichess': 'antichess-dd3cbe53cd4e.nnue',
+        'atomic': 'atomic-2cf13ff256cc.nnue',
+        'horde': 'horde-28173ddccabe.nnue',
+        'racingkings': 'racingkings-636b95f085e3.nnue',
+    };
+    
+    const variantNnue = variantNnueMap[variant];
+    if (!variantNnue) {
+        console.error(`No NNUE model found for variant: ${variant}`);
+        return;
+    }
+    
+    // Set UCI variant
+    send_engine_uci(`setoption name UCI_Variant value ${variant}`);
+    
+    // Load NNUE model
+    const nnue_response = await fetch(`${engineBasePath}/nnue/${variantNnue}`);
+    const nnueBuffer = await nnue_response.arrayBuffer();
+    engine.setNnueBuffer(new Uint8Array(nnueBuffer), 0);
+    
+    // Reset engine state
+    send_engine_uci('ucinewgame');
+    send_engine_uci('isready');
+    
+    console.log(`Loaded NNUE for ${variant}: ${variantNnue}`);
 }
 
 function send_engine_uci(message) {
@@ -420,7 +534,7 @@ function parse_position_from_response(txt) {
         }
 
         let record;
-        const lastMoveRegex = /([\w-+=#]+[*]+)$/;
+        const lastMoveRegex = /([\w-+=#@]+[*]+)$/;  // Added @ for drop moves
         const indirectKey = directKey.replace(lastMoveRegex, '');
         const indirectHit = fen_cache.get(indirectKey);
         if (indirectHit) { // append newest move
@@ -481,8 +595,10 @@ function parse_position_from_response(txt) {
             const fenTxt = txt.substring(txt.indexOf('&') + 6);
             const startFen = parse_position_from_pieces(puzTxt).fen.replace('-', 'KQkq');
             return parse_position_from_moves(fenTxt, startFen);
+        } else {
+            // All other variants use standard starting position or variant-specific
+            return parse_position_from_moves(txt);
         }
-        return parse_position_from_moves(txt);
     } else if (metaTag.includes('puz')) { // chess.com & blitztactics.com puzzle pages
         return parse_position_from_pieces(txt);
     } else { // chess.com and lichess.org pages
