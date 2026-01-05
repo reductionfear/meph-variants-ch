@@ -9,6 +9,77 @@ const DEFAULT_POSITION = 'w*****b-r-a8*****b-n-b8*****b-b-c8*****b-q-d8*****b-k-
     'w-p-a2*****w-p-b2*****w-p-c2*****w-p-d2*****w-p-e2*****w-p-f2*****w-p-g2*****w-p-h2*****w-r-a1*****' +
     'w-n-b1*****w-b-c1*****w-q-d1*****w-k-e1*****w-b-f1*****w-n-g1*****w-r-h1*****';
 
+const LICHESS_VARIANT_MAP = {
+    'standard': 'chess',
+    'chess960': 'fischerandom',
+    'crazyhouse': 'crazyhouse',
+    'kingOfTheHill': 'kingofthehill',
+    'threeCheck': '3check',
+    'antichess': 'antichess',
+    'atomic': 'atomic',
+    'horde': 'horde',
+    'racingKings': 'racingkings'
+};
+
+function detectVariantFromPage() {
+    if (site !== 'lichess') return null;
+    
+    // Method 1: Check variant-link element (game pages)
+    const variantLink = document.querySelector('.variant-link');
+    if (variantLink) {
+        const href = variantLink.getAttribute('href');
+        if (href) {
+            const match = href.match(/\/variant\/(\w+)/);
+            if (match) {
+                const lichessVariant = match[1];
+                return LICHESS_VARIANT_MAP[lichessVariant] || null;
+            }
+        }
+    }
+    
+    // Method 2: Check page URL patterns
+    const url = window.location.href;
+    const urlPatterns = [
+        { pattern: /\/chess960/, variant: 'fischerandom' },
+        { pattern: /\/crazyhouse/, variant: 'crazyhouse' },
+        { pattern: /\/kingOfTheHill/, variant: 'kingofthehill' },
+        { pattern: /\/threeCheck/, variant: '3check' },
+        { pattern: /\/antichess/, variant: 'antichess' },
+        { pattern: /\/atomic/, variant: 'atomic' },
+        { pattern: /\/horde/, variant: 'horde' },
+        { pattern: /\/racingKings/, variant: 'racingkings' }
+    ];
+    
+    for (const { pattern, variant } of urlPatterns) {
+        if (pattern.test(url)) return variant;
+    }
+    
+    // Method 3: Check game metadata in round__app div
+    const roundApp = document.querySelector('.round__app');
+    if (roundApp) {
+        // Check for variant classes like 'variant-crazyhouse', 'variant-atomic', etc.
+        const variantClassMap = {
+            'variant-standard': 'chess',
+            'variant-chess960': 'fischerandom',
+            'variant-crazyhouse': 'crazyhouse',
+            'variant-kingofthehill': 'kingofthehill',
+            'variant-threecheck': '3check',
+            'variant-antichess': 'antichess',
+            'variant-atomic': 'atomic',
+            'variant-horde': 'horde',
+            'variant-racingkings': 'racingkings'
+        };
+        
+        for (const [className, engineName] of Object.entries(variantClassMap)) {
+            if (roundApp.classList.contains(className)) {
+                return engineName;
+            }
+        }
+    }
+    
+    return null;
+}
+
 window.onload = () => {
     console.log('Mephisto is listening!');
     const siteMap = {
@@ -25,9 +96,15 @@ chrome.runtime.onMessage.addListener(response => {
     if (moving) return;
     if (response.queryfen) {
         if (!config) return;
-        const res = tryScrapePosition();
+        const detectedVariant = detectVariantFromPage();
+        const res = tryScrapePosition(detectedVariant);
         const orient = getOrientation();
-        chrome.runtime.sendMessage({ dom: res, orient: orient, fenresponse: true });
+        chrome.runtime.sendMessage({ 
+            dom: res, 
+            orient: orient, 
+            detectedVariant: detectedVariant,
+            fenresponse: true 
+        });
     } else if (response.automove) {
         toggleMoving();
         if (config.puzzle_mode) {
@@ -45,16 +122,19 @@ chrome.runtime.onMessage.addListener(response => {
     }
 });
 
-function tryScrapePosition() {
+function tryScrapePosition(detectedVariant) {
     try {
-        return scrapePosition();
+        return scrapePosition(detectedVariant);
     } catch (e) {
         return 'no'; // skip the current attempt, if we can't scrape
     }
 }
 
-function scrapePosition() {
+function scrapePosition(detectedVariant = null) {
     if (!getBoard()) return;
+
+    // Use detected variant or fall back to config
+    const activeVariant = detectedVariant || config.variant;
 
     let prefix = '';
     if (site === 'chesscom') {
@@ -66,7 +146,7 @@ function scrapePosition() {
     }
 
     let res;
-    if (config.variant === 'chess') {
+    if (activeVariant === 'chess') {
         const moveContainer = getMoveContainer();
         if (moveContainer != null) {
             prefix += 'fen***';
@@ -77,9 +157,11 @@ function scrapePosition() {
         }
     } else {
         prefix += 'var***';
-        if (config.variant === 'fischerandom') {
+        if (activeVariant === 'fischerandom') {
             const startPos = readStartPos(location.href)?.position || DEFAULT_POSITION;
             res = startPos + '&*****';
+        } else {
+            res = '';
         }
         const moves = getMoveRecords();
         res += (moves?.length) ? scrapePositionFen(moves) : '?';
