@@ -382,6 +382,10 @@ function scrapePosition(detectedVariant = null) {
         if (activeVariant === 'fischerandom') {
             const startPos = readStartPos(location.href)?.position || DEFAULT_POSITION;
             res = startPos + '&*****';
+        } else if (activeVariant === 'crazyhouse') {
+            // For Crazyhouse, update pockets from DOM before scraping
+            updatePocketsFromDOM();
+            res = '';
         } else {
             res = '';
         }
