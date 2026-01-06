@@ -129,7 +129,8 @@ class FairyStockfishServer:
         async with websockets.serve(self.handle_client, host, port):
             print(f"[Server] ✅ Ready! Connect your extension to ws://{host}:{port}")
             print(f"[Server] Supported variants: chess, crazyhouse, atomic, kingofthehill, 3check, antichess, horde, racingkings")
-            await asyncio.Future()  # Run forever
+            # Keep server running indefinitely
+            await asyncio.Event().wait()
 
 async def main():
     global FAIRY_STOCKFISH_PATH

@@ -19,6 +19,9 @@ const DEFAULT_THINK_VARIANCE = 500;
 const DEFAULT_MOVE_TIME = 500;
 const DEFAULT_MOVE_VARIANCE = 250;
 
+// Drop piece role mapping (UCI piece char to Lichess role name)
+const DROP_ROLE_MAP = { 'P': 'pawn', 'N': 'knight', 'B': 'bishop', 'R': 'rook', 'Q': 'queen' };
+
 // --- INJECT HOOK IMMEDIATELY ---
 // This must run before the page creates its WebSocket
 const script = document.createElement('script');
@@ -129,7 +132,8 @@ function detectVariantFromPage() {
 }
 
 // --- CRAZYHOUSE POCKET TRACKING ---
-// whitePocket and blackPocket are declared at the top of the file
+// Note: whitePocket and blackPocket variables are declared at the top of the file with other globals
+// This section contains functions for managing Crazyhouse piece pockets
 
 function resetPockets() {
     whitePocket = { pawn: 0, knight: 0, bishop: 0, rook: 0, queen: 0 };
@@ -326,8 +330,7 @@ function executeMove(uci) {
     if (isDrop) {
         // Parse drop: P@e4 -> role: pawn, pos: e4
         const pieceChar = uci[0].toUpperCase();
-        const roleMap = { 'P': 'pawn', 'N': 'knight', 'B': 'bishop', 'R': 'rook', 'Q': 'queen' };
-        const role = roleMap[pieceChar];
+        const role = DROP_ROLE_MAP[pieceChar];
         const pos = uci.substring(2);
         
         if (!role) {
@@ -345,7 +348,7 @@ function executeMove(uci) {
                 d: { 
                     role: role,
                     pos: pos,
-                    a: currentAck
+                    a: currentAck  // Acknowledgment number from last server message
                 } 
             }
         }, '*');
@@ -359,10 +362,10 @@ function executeMove(uci) {
             payload: { 
                 t: "move", 
                 d: { 
-                    u: uci, 
-                    a: currentAck, 
-                    b: 0, 
-                    l: 10000 
+                    u: uci,                // UCI move notation (e.g., e2e4, e7e8q)
+                    a: currentAck,         // Acknowledgment number from last server message
+                    b: 0,                  // Blur (0 = not blurred, used for anti-cheat)
+                    l: 10000               // Lag compensation in milliseconds
                 } 
             }
         }, '*');
@@ -375,8 +378,7 @@ function executeMove(uci) {
 function executeDropMove(dropNotation) {
     // Parse drop: P@e4 -> role: pawn, pos: e4
     const pieceChar = dropNotation[0];
-    const roleMap = { 'P': 'pawn', 'N': 'knight', 'B': 'bishop', 'R': 'rook', 'Q': 'queen' };
-    const role = roleMap[pieceChar];
+    const role = DROP_ROLE_MAP[pieceChar];
     const pos = dropNotation.substring(2);
     
     if (!role) {
