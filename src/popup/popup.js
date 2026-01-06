@@ -100,9 +100,13 @@ document.addEventListener('DOMContentLoaded', async function () {
                 board.orientation(response.orient);
             }
             
-            // Handle variant change
+            // Handle variant change (only if auto-detect is enabled and using Fairy Stockfish)
             const detectedVariant = response.detectedVariant || 'chess';
-            if (detectedVariant !== currentVariant) {
+            const shouldAutoDetect = config.auto_detect_variant && 
+                                    (config.engine === 'fairy-stockfish-14-nnue' || 
+                                     config.engine === 'fairy-stockfish-external');
+            
+            if (shouldAutoDetect && detectedVariant !== currentVariant) {
                 currentVariant = detectedVariant;
                 await handleVariantChange(detectedVariant);
             }
@@ -280,6 +284,15 @@ async function handleVariantChange(variant) {
     
     // Update config variant
     config.variant = variant;
+    
+    // Handle external engine variant changes
+    if (config.engine === 'fairy-stockfish-external') {
+        // Send variant change to external engine
+        send_external_engine_uci(`setoption name UCI_Variant value ${variant}`);
+        send_external_engine_uci('isready');
+        updateVariantDisplay(variant);
+        return;
+    }
     
     // Determine if we need Fairy Stockfish
     const needsFairyStockfish = variant !== 'chess' && variant !== 'fischerandom';
