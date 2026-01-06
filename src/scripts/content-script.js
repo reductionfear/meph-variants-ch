@@ -80,6 +80,222 @@ function detectVariantFromPage() {
     return null;
 }
 
+// --- CRAZYHOUSE POCKET TRACKING ---
+let whitePocket = {}; // { pawn: 0, knight: 0, bishop: 0, rook: 0, queen: 0 }
+let blackPocket = {};
+
+function resetPockets() {
+    whitePocket = { pawn: 0, knight: 0, bishop: 0, rook: 0, queen: 0 };
+    blackPocket = { pawn: 0, knight: 0, bishop: 0, rook: 0, queen: 0 };
+}
+
+function updatePocketsFromDOM() {
+    if (site !== 'lichess') return;
+    
+    // Parse pocket pieces from Lichess DOM
+    const pocketTop = document.querySelector('.pocket-top');
+    const pocketBottom = document.querySelector('.pocket-bottom');
+    
+    if (!pocketTop || !pocketBottom) return;
+
+    const parsePocket = (pocketEl) => {
+        const pocket = { pawn: 0, knight: 0, bishop: 0, rook: 0, queen: 0 };
+        const pieces = pocketEl.querySelectorAll('piece');
+        pieces.forEach(piece => {
+            const nb = parseInt(piece.getAttribute('data-nb') || '0', 10);
+            const role = piece.getAttribute('data-role');
+            if (role && pocket.hasOwnProperty(role)) {
+                pocket[role] = nb;
+            }
+        });
+        return pocket;
+    };
+
+    // Determine which pocket is which based on board orientation
+    const board = getBoard();
+    const isWhite = board && board.parentElement && 
+                    board.parentElement.classList.contains('orientation-white');
+    
+    if (isWhite) {
+        whitePocket = parsePocket(pocketBottom);
+        blackPocket = parsePocket(pocketTop);
+    } else {
+        whitePocket = parsePocket(pocketTop);
+        blackPocket = parsePocket(pocketBottom);
+    }
+}
+
+function getPocketFenPart() {
+    // Generate pocket string for FEN: [QRBNPqrbnp]
+    let pocket = '';
+    const addPieces = (p, upper) => {
+        const order = ['queen', 'rook', 'bishop', 'knight', 'pawn'];
+        const letters = { queen: 'Q', rook: 'R', bishop: 'B', knight: 'N', pawn: 'P' };
+        for (const piece of order) {
+            const count = p[piece] || 0;
+            const letter = upper ? letters[piece] : letters[piece].toLowerCase();
+            pocket += letter.repeat(count);
+        }
+    };
+    addPieces(whitePocket, true);
+    addPieces(blackPocket, false);
+    return `[${pocket}]`;
+}
+
+function getVariantFen(baseFen, variant) {
+    if (variant === 'crazyhouse') {
+        // Crazyhouse FEN includes pockets
+        updatePocketsFromDOM();
+        const parts = baseFen.split(' ');
+        // Insert pocket after piece placement: rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR[QRrb] w KQkq - 0 1
+        parts[0] = parts[0] + getPocketFenPart();
+        return parts.join(' ');
+    }
+    
+    return baseFen;
+}
+
+// --- WEBSOCKET ENGINE SUPPORT ---
+let externalEngineConnected = false;
+let externalEngineReady = false;
+
+function initExternalEngine() {
+    console.log('[ExtEngine] Subscribing to background WebSocket...');
+    chrome.runtime.sendMessage({ type: 'ws-subscribe' }, (response) => {
+        if (response && response.connected) {
+            externalEngineConnected = true;
+            console.log('[ExtEngine] Connected to external engine');
+        }
+    });
+    
+    // Listen for engine messages from background
+    chrome.runtime.onMessage.addListener((message) => {
+        if (message.type === 'ws-status') {
+            externalEngineConnected = message.connected;
+            console.log('[ExtEngine] Connection status:', message.connected);
+        } else if (message.type === 'ws-message') {
+            handleEngineMessage(message.data);
+        }
+    });
+}
+
+function handleEngineMessage(data) {
+    if (data.includes('uciok')) {
+        externalEngineReady = true;
+        configureEngineForVariant();
+    }
+}
+
+function configureEngineForVariant() {
+    const detectedVariant = detectVariantFromPage();
+    if (!detectedVariant) return;
+    
+    console.log(`[ExtEngine] Configuring for variant: ${detectedVariant}`);
+    
+    // Set UCI_Variant for Fairy Stockfish
+    sendToEngine(`setoption name UCI_Variant value ${detectedVariant}`);
+    
+    // Set Chess960 mode if applicable (fischerandom is the variant name for Chess960)
+    if (detectedVariant === 'fischerandom') {
+        sendToEngine('setoption name UCI_Chess960 value true');
+    }
+    
+    // Standard engine options
+    sendToEngine('setoption name Threads value 1');
+    sendToEngine('setoption name Hash value 128');
+    
+    // Variant-specific options
+    if (detectedVariant === 'antichess') {
+        sendToEngine('setoption name Contempt value 0');
+    }
+    
+    sendToEngine('isready');
+}
+
+function sendToEngine(command) {
+    if (!externalEngineConnected) return;
+    
+    chrome.runtime.sendMessage({ 
+        type: 'ws-send', 
+        data: command 
+    });
+}
+
+// Enhanced move execution with drop support
+function executeDropMove(dropNotation) {
+    // Parse drop: P@e4 -> role: pawn, pos: e4
+    const pieceChar = dropNotation[0];
+    const roleMap = { 'P': 'pawn', 'N': 'knight', 'B': 'bishop', 'R': 'rook', 'Q': 'queen' };
+    const role = roleMap[pieceChar];
+    const pos = dropNotation.substring(2);
+    
+    if (!role) {
+        console.error('[Drop] Invalid drop notation:', dropNotation);
+        return Promise.resolve(false);
+    }
+    
+    console.log(`[Drop] Executing drop: ${dropNotation} (role: ${role}, pos: ${pos})`);
+    
+    // For Lichess, we need to trigger the drop through the UI
+    // This is complex and may require clicking the pocket piece then the square
+    if (site === 'lichess') {
+        return executeLichessDropMove(role, pos);
+    }
+    
+    return Promise.resolve(false);
+}
+
+function executeLichessDropMove(role, pos) {
+    return new Promise((resolve) => {
+        // Find the pocket piece element
+        const pocketBottom = document.querySelector('.pocket-bottom');
+        if (!pocketBottom) {
+            console.error('[Drop] Pocket not found');
+            resolve(false);
+            return;
+        }
+        
+        // Find the piece with the specified role
+        const pocketPiece = pocketBottom.querySelector(`piece[data-role="${role}"]`);
+        if (!pocketPiece) {
+            console.error('[Drop] Piece not found in pocket:', role);
+            resolve(false);
+            return;
+        }
+        
+        // Get the board orientation to calculate correct square
+        const boardBounds = getBoard().getBoundingClientRect();
+        const squareSide = boardBounds.width / 8;
+        const orientation = getOrientation();
+        
+        const [xIdx, yIdx] = (orientation === 'white')
+            ? [pos[0].charCodeAt(0) - 'a'.charCodeAt(0), 8 - parseInt(pos[1])]
+            : ['h'.charCodeAt(0) - pos[0].charCodeAt(0), parseInt(pos[1]) - 1];
+        
+        const targetBounds = new DOMRect(
+            boardBounds.x + xIdx * squareSide,
+            boardBounds.y + yIdx * squareSide,
+            squareSide,
+            squareSide
+        );
+        
+        // Get think/move times from config
+        const thinkTime = config.think_time + Math.random() * config.think_variance;
+        const moveTime = config.move_time + Math.random() * config.move_variance;
+        
+        // Think, then click pocket piece
+        setTimeout(() => {
+            simulateClickSquare(pocketPiece.getBoundingClientRect(), 0.5);
+            
+            // Wait a bit, then click the target square
+            setTimeout(() => {
+                simulateClickSquare(targetBounds, 0.8);
+                resolve(true);
+            }, moveTime);
+        }, thinkTime);
+    });
+}
+
 window.onload = () => {
     console.log('Mephisto is listening!');
     const siteMap = {
@@ -88,6 +304,12 @@ window.onload = () => {
         'blitztactics.com': 'blitztactics'
     };
     site = siteMap[window.location.hostname];
+    
+    // Initialize external engine for Lichess variants
+    if (site === 'lichess') {
+        initExternalEngine();
+    }
+    
     pullConfig();
     determineStartPosition();
 };
@@ -567,6 +789,11 @@ function simulateClickSquare(bounds, range = 0.8) {
 }
 
 function simulateMove(move) {
+    // Check if this is a drop move (e.g., P@e4, N@f3)
+    if (move.includes('@')) {
+        return executeDropMove(move);
+    }
+    
     const boardBounds = getBoard().getBoundingClientRect();
     const orientation = getOrientation();
 
