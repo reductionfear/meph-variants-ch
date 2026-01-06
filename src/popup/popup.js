@@ -65,6 +65,8 @@ document.addEventListener('DOMContentLoaded', async function () {
         autoplay: JSON.parse(localStorage.getItem('autoplay')) || false,
         puzzle_mode: JSON.parse(localStorage.getItem('puzzle_mode')) || false,
         python_autoplay_backend: JSON.parse(localStorage.getItem('python_autoplay_backend')) || false,
+        external_engine_url: JSON.parse(localStorage.getItem('external_engine_url')) || 'ws://localhost:8080',
+        auto_detect_variant: JSON.parse(localStorage.getItem('auto_detect_variant')) !== false,
         // appearance settings
         pieces: JSON.parse(localStorage.getItem('pieces')) || 'wikipedia.svg',
         board: JSON.parse(localStorage.getItem('board')) || 'brown',
@@ -98,9 +100,13 @@ document.addEventListener('DOMContentLoaded', async function () {
                 board.orientation(response.orient);
             }
             
-            // Handle variant change
+            // Handle variant change (only if auto-detect is enabled and using Fairy Stockfish)
             const detectedVariant = response.detectedVariant || 'chess';
-            if (detectedVariant !== currentVariant) {
+            const shouldAutoDetect = config.auto_detect_variant && 
+                                    (config.engine === 'fairy-stockfish-14-nnue' || 
+                                     config.engine === 'fairy-stockfish-external');
+            
+            if (shouldAutoDetect && detectedVariant !== currentVariant) {
                 currentVariant = detectedVariant;
                 await handleVariantChange(detectedVariant);
             }
@@ -114,6 +120,11 @@ document.addEventListener('DOMContentLoaded', async function () {
         } else if (response.click) {
             console.log(response);
             dispatch_click_event(response.x, response.y);
+        } else if (response.type === 'ws-message') {
+            // Forward external engine responses to engine response handler
+            on_engine_response(response.data);
+        } else if (response.type === 'ws-status') {
+            console.log('[ExtEngine] Status:', response.connected ? 'Connected' : 'Disconnected');
         }
     });
 
@@ -157,6 +168,13 @@ async function initialize_engine() {
         'lc0': 'lc0/lc0.js',
         'fairy-stockfish-14-nnue': 'fairy-stockfish-14/fsf14.js',
     }
+    
+    // Handle external WebSocket engine
+    if (config.engine === 'fairy-stockfish-external') {
+        await initialize_external_engine();
+        return;
+    }
+    
     const enginePath = `/lib/engine/${engineMap[config.engine]}`;
     const engineBasePath = enginePath.substring(0, enginePath.lastIndexOf('/'));
     if (['stockfish-16-nnue-40', 'stockfish-6'].includes(config.engine)) {
@@ -228,11 +246,79 @@ async function initialize_engine() {
     console.log('Engine ready!', engine);
 }
 
+async function initialize_external_engine() {
+    console.log('[ExtEngine] Initializing external Fairy Stockfish...');
+    
+    // Set URL and connect via background script
+    return new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage({ type: 'ws-set-url', url: config.external_engine_url }, (setUrlResponse) => {
+            if (chrome.runtime.lastError) {
+                console.error('[ExtEngine] Error setting URL:', chrome.runtime.lastError.message);
+                reject(new Error(`Failed to set WebSocket URL: ${chrome.runtime.lastError.message}`));
+                return;
+            }
+            
+            if (!setUrlResponse || !setUrlResponse.success) {
+                reject(new Error('Failed to set WebSocket URL'));
+                return;
+            }
+            
+            // Now subscribe to WebSocket
+            chrome.runtime.sendMessage({ type: 'ws-subscribe' }, (response) => {
+                if (chrome.runtime.lastError) {
+                    console.error('[ExtEngine] Error subscribing:', chrome.runtime.lastError.message);
+                    reject(new Error(`Failed to subscribe to WebSocket: ${chrome.runtime.lastError.message}`));
+                    return;
+                }
+                
+                if (response && response.connected) {
+                    console.log('[ExtEngine] Connected to WebSocket');
+                    
+                    // Configure engine with proper initialization sequence
+                    const ENGINE_INIT_DELAY = 500; // Time for engine to process UCI command
+                    send_external_engine_uci('uci');
+                    
+                    setTimeout(() => {
+                        send_external_engine_uci(`setoption name UCI_Variant value ${config.variant}`);
+                        send_external_engine_uci('setoption name Threads value ' + config.threads);
+                        send_external_engine_uci('setoption name Hash value ' + config.memory);
+                        send_external_engine_uci('setoption name MultiPV value ' + config.multiple_lines);
+                        send_external_engine_uci('isready');
+                        resolve();
+                    }, ENGINE_INIT_DELAY);
+                } else {
+                    console.error('[ExtEngine] Failed to connect - response:', response);
+                    reject(new Error('Failed to connect to external engine'));
+                }
+            });
+        });
+    });
+}
+
+function send_external_engine_uci(command) {
+    chrome.runtime.sendMessage({ type: 'ws-send', data: command }, (response) => {
+        if (chrome.runtime.lastError) {
+            console.error('[ExtEngine] Error sending command:', chrome.runtime.lastError.message);
+        } else if (response && !response.success) {
+            console.warn('[ExtEngine] Command may not have been sent:', command);
+        }
+    });
+}
+
 async function handleVariantChange(variant) {
     console.log(`Variant changed to: ${variant}`);
     
     // Update config variant
     config.variant = variant;
+    
+    // Handle external engine variant changes
+    if (config.engine === 'fairy-stockfish-external') {
+        // Send variant change to external engine
+        send_external_engine_uci(`setoption name UCI_Variant value ${variant}`);
+        send_external_engine_uci('isready');
+        updateVariantDisplay(variant);
+        return;
+    }
     
     // Determine if we need Fairy Stockfish
     const needsFairyStockfish = variant !== 'chess' && variant !== 'fischerandom';
@@ -309,7 +395,9 @@ async function reloadVariantNnue(variant) {
 }
 
 function send_engine_uci(message) {
-    if (config.engine === 'lc0') {
+    if (config.engine === 'fairy-stockfish-external') {
+        send_external_engine_uci(message);
+    } else if (config.engine === 'lc0') {
         engine.postMessage(message, '*');
     } else if (engine instanceof Worker) {
         engine.postMessage(message);

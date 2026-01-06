@@ -8,6 +8,8 @@ class GeneralSettings extends SettingsPage {
         M.Tooltip.init(document.querySelectorAll('.tooltipped'), {enterDelay: 1000});
         const engine_select = this.registerFormElement('engine', 'Engine:', 'select', 'stockfish-16-nnue-7');
         const variant_select = this.registerFormElement('variant', 'Variant:', 'select', 'chess');
+        this.registerFormElement('external_engine_url', 'External Engine URL:', 'input', 'ws://localhost:8080');
+        this.registerFormElement('auto_detect_variant', 'Auto-detect Variant:', 'checkbox', true);
         this.registerFormElement('compute_time', 'Stockfish Compute Time (ms):', 'input', 3000);
         this.registerFormElement('fen_refresh', 'Fen Refresh Interval (ms):', 'input', 100);
         const multipv_range = this.registerFormElement('multiple_lines', 'Multiple Lines:', 'range', 1);
@@ -35,17 +37,35 @@ class GeneralSettings extends SettingsPage {
             });
         }
         engine_select.registerChangeListener(() => {
-            let section = variant_select.elem;
-            while (!section.classList.contains('section')) {
-                section = section.parentElement
+            let variantSection = variant_select.elem;
+            while (!variantSection.classList.contains('section')) {
+                variantSection = variantSection.parentElement;
             }
-            if (engine_select.getValue() === 'fairy-stockfish-14-nnue') {
-                section.classList.remove('hidden');
+            
+            const externalEngineSection = document.getElementById('external_engine_section');
+            const autoDetectSection = document.getElementById('auto_detect_variant_section');
+            
+            const engineValue = engine_select.getValue();
+            
+            // Show variant selector for Fairy Stockfish engines
+            if (engineValue === 'fairy-stockfish-14-nnue' || engineValue === 'fairy-stockfish-external') {
+                variantSection.classList.remove('hidden');
+                if (autoDetectSection) autoDetectSection.classList.remove('hidden');
             } else {
-                section.classList.add('hidden');
+                variantSection.classList.add('hidden');
                 variant_select.setValue('chess');
+                if (autoDetectSection) autoDetectSection.classList.add('hidden');
             }
-            if (engine_select.getValue() === 'remote') {
+            
+            // Show external engine URL field only for external engine
+            if (engineValue === 'fairy-stockfish-external') {
+                if (externalEngineSection) externalEngineSection.classList.remove('hidden');
+            } else {
+                if (externalEngineSection) externalEngineSection.classList.add('hidden');
+            }
+            
+            // Show tooltip for remote engine
+            if (engineValue === 'remote') {
                 engineLabelTooltiped.classList.remove('hidden');
                 engineLabelUntooltiped.classList.add('hidden');
             } else {
