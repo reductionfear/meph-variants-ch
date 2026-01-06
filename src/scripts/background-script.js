@@ -1,6 +1,9 @@
 // Background service worker - Enhanced for Fairy Stockfish variants via WebSocket
 
 let ws = null;
+// WebSocket URL for external Fairy Stockfish engine
+// This can be changed via ws-set-url message or configured in extension options
+// For security, only localhost connections are typically allowed
 let wsUrl = 'ws://localhost:8080/ws';
 let isConnected = false;
 let reconnectTimer = null;
@@ -65,7 +68,8 @@ function connectWebSocket() {
 
 function broadcastToTabs(message) {
   subscribedTabs.forEach(tabId => {
-    chrome.tabs.sendMessage(tabId, message).catch(() => {
+    chrome.tabs.sendMessage(tabId, message).catch((error) => {
+      console.warn(`[BG] Failed to send message to tab ${tabId}:`, error.message);
       subscribedTabs.delete(tabId);
     });
   });

@@ -104,7 +104,7 @@ function updatePocketsFromDOM() {
         pieces.forEach(piece => {
             const nb = parseInt(piece.getAttribute('data-nb') || '0', 10);
             const role = piece.getAttribute('data-role');
-            if (role && pocket.hasOwnProperty(role)) {
+            if (role && role in pocket) {
                 pocket[role] = nb;
             }
         });
@@ -112,9 +112,8 @@ function updatePocketsFromDOM() {
     };
 
     // Determine which pocket is which based on board orientation
-    const board = getBoard();
-    const isWhite = board && board.parentElement && 
-                    board.parentElement.classList.contains('orientation-white');
+    const orientation = getOrientation();
+    const isWhite = orientation === 'white';
     
     if (isWhite) {
         whitePocket = parsePocket(pocketBottom);
@@ -162,6 +161,11 @@ let externalEngineReady = false;
 function initExternalEngine() {
     console.log('[ExtEngine] Subscribing to background WebSocket...');
     chrome.runtime.sendMessage({ type: 'ws-subscribe' }, (response) => {
+        if (chrome.runtime.lastError) {
+            console.error('[ExtEngine] Failed to subscribe:', chrome.runtime.lastError);
+            externalEngineConnected = false;
+            return;
+        }
         if (response && response.connected) {
             externalEngineConnected = true;
             console.log('[ExtEngine] Connected to external engine');
@@ -247,16 +251,25 @@ function executeDropMove(dropNotation) {
 
 function executeLichessDropMove(role, pos) {
     return new Promise((resolve) => {
-        // Find the pocket piece element
-        const pocketBottom = document.querySelector('.pocket-bottom');
-        if (!pocketBottom) {
-            console.error('[Drop] Pocket not found');
+        // Determine which pocket to use based on current turn
+        const turn = getTurn();
+        const pocketSelector = (turn === 'w') ? '.pocket-bottom' : '.pocket-top';
+        
+        // Adjust based on board orientation
+        const orientation = getOrientation();
+        const actualPocketSelector = (orientation === 'white') 
+            ? (turn === 'w' ? '.pocket-bottom' : '.pocket-top')
+            : (turn === 'w' ? '.pocket-top' : '.pocket-bottom');
+        
+        const pocket = document.querySelector(actualPocketSelector);
+        if (!pocket) {
+            console.error('[Drop] Pocket not found for current turn');
             resolve(false);
             return;
         }
         
         // Find the piece with the specified role
-        const pocketPiece = pocketBottom.querySelector(`piece[data-role="${role}"]`);
+        const pocketPiece = pocket.querySelector(`piece[data-role="${role}"]`);
         if (!pocketPiece) {
             console.error('[Drop] Piece not found in pocket:', role);
             resolve(false);
@@ -266,7 +279,6 @@ function executeLichessDropMove(role, pos) {
         // Get the board orientation to calculate correct square
         const boardBounds = getBoard().getBoundingClientRect();
         const squareSide = boardBounds.width / 8;
-        const orientation = getOrientation();
         
         const [xIdx, yIdx] = (orientation === 'white')
             ? [pos[0].charCodeAt(0) - 'a'.charCodeAt(0), 8 - parseInt(pos[1])]
@@ -279,20 +291,36 @@ function executeLichessDropMove(role, pos) {
             squareSide
         );
         
-        // Get think/move times from config
-        const thinkTime = config.think_time + Math.random() * config.think_variance;
-        const moveTime = config.move_time + Math.random() * config.move_variance;
-        
-        // Think, then click pocket piece
-        setTimeout(() => {
-            simulateClickSquare(pocketPiece.getBoundingClientRect(), 0.5);
+        // Check if config is loaded
+        if (!config || !config.think_time || !config.move_time) {
+            console.warn('[Drop] Config not loaded, using defaults');
+            // Use defaults if config not available
+            const thinkTime = 1000 + Math.random() * 500;
+            const moveTime = 500 + Math.random() * 250;
             
-            // Wait a bit, then click the target square
             setTimeout(() => {
-                simulateClickSquare(targetBounds, 0.8);
-                resolve(true);
-            }, moveTime);
-        }, thinkTime);
+                simulateClickSquare(pocketPiece.getBoundingClientRect(), 0.5);
+                setTimeout(() => {
+                    simulateClickSquare(targetBounds, 0.8);
+                    resolve(true);
+                }, moveTime);
+            }, thinkTime);
+        } else {
+            // Get think/move times from config
+            const thinkTime = config.think_time + Math.random() * config.think_variance;
+            const moveTime = config.move_time + Math.random() * config.move_variance;
+            
+            // Think, then click pocket piece
+            setTimeout(() => {
+                simulateClickSquare(pocketPiece.getBoundingClientRect(), 0.5);
+                
+                // Wait a bit, then click the target square
+                setTimeout(() => {
+                    simulateClickSquare(targetBounds, 0.8);
+                    resolve(true);
+                }, moveTime);
+            }, thinkTime);
+        }
     });
 }
 
