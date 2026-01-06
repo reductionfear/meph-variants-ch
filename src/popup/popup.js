@@ -250,33 +250,59 @@ async function initialize_external_engine() {
     console.log('[ExtEngine] Initializing external Fairy Stockfish...');
     
     // Set URL and connect via background script
-    chrome.runtime.sendMessage({ type: 'ws-set-url', url: config.external_engine_url });
-    
     return new Promise((resolve, reject) => {
-        chrome.runtime.sendMessage({ type: 'ws-subscribe' }, (response) => {
-            if (response && response.connected) {
-                console.log('[ExtEngine] Connected to WebSocket');
-                
-                // Configure engine
-                send_external_engine_uci('uci');
-                setTimeout(() => {
-                    send_external_engine_uci(`setoption name UCI_Variant value ${config.variant}`);
-                    send_external_engine_uci('setoption name Threads value ' + config.threads);
-                    send_external_engine_uci('setoption name Hash value ' + config.memory);
-                    send_external_engine_uci('setoption name MultiPV value ' + config.multiple_lines);
-                    send_external_engine_uci('isready');
-                    resolve();
-                }, 500);
-            } else {
-                console.error('[ExtEngine] Failed to connect');
-                reject(new Error('Failed to connect to external engine'));
+        chrome.runtime.sendMessage({ type: 'ws-set-url', url: config.external_engine_url }, (setUrlResponse) => {
+            if (chrome.runtime.lastError) {
+                console.error('[ExtEngine] Error setting URL:', chrome.runtime.lastError.message);
+                reject(new Error(`Failed to set WebSocket URL: ${chrome.runtime.lastError.message}`));
+                return;
             }
+            
+            if (!setUrlResponse || !setUrlResponse.success) {
+                reject(new Error('Failed to set WebSocket URL'));
+                return;
+            }
+            
+            // Now subscribe to WebSocket
+            chrome.runtime.sendMessage({ type: 'ws-subscribe' }, (response) => {
+                if (chrome.runtime.lastError) {
+                    console.error('[ExtEngine] Error subscribing:', chrome.runtime.lastError.message);
+                    reject(new Error(`Failed to subscribe to WebSocket: ${chrome.runtime.lastError.message}`));
+                    return;
+                }
+                
+                if (response && response.connected) {
+                    console.log('[ExtEngine] Connected to WebSocket');
+                    
+                    // Configure engine with proper initialization sequence
+                    const ENGINE_INIT_DELAY = 500; // Time for engine to process UCI command
+                    send_external_engine_uci('uci');
+                    
+                    setTimeout(() => {
+                        send_external_engine_uci(`setoption name UCI_Variant value ${config.variant}`);
+                        send_external_engine_uci('setoption name Threads value ' + config.threads);
+                        send_external_engine_uci('setoption name Hash value ' + config.memory);
+                        send_external_engine_uci('setoption name MultiPV value ' + config.multiple_lines);
+                        send_external_engine_uci('isready');
+                        resolve();
+                    }, ENGINE_INIT_DELAY);
+                } else {
+                    console.error('[ExtEngine] Failed to connect - response:', response);
+                    reject(new Error('Failed to connect to external engine'));
+                }
+            });
         });
     });
 }
 
 function send_external_engine_uci(command) {
-    chrome.runtime.sendMessage({ type: 'ws-send', data: command });
+    chrome.runtime.sendMessage({ type: 'ws-send', data: command }, (response) => {
+        if (chrome.runtime.lastError) {
+            console.error('[ExtEngine] Error sending command:', chrome.runtime.lastError.message);
+        } else if (response && !response.success) {
+            console.warn('[ExtEngine] Command may not have been sent:', command);
+        }
+    });
 }
 
 async function handleVariantChange(variant) {
