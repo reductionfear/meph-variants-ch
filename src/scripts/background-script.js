@@ -67,12 +67,15 @@ function connectWebSocket() {
 }
 
 function broadcastToTabs(message) {
+  const failedTabs = [];
   subscribedTabs.forEach(tabId => {
     chrome.tabs.sendMessage(tabId, message).catch((error) => {
       console.warn(`[BG] Failed to send message to tab ${tabId}:`, error.message);
-      subscribedTabs.delete(tabId);
+      failedTabs.push(tabId);
     });
   });
+  // Remove failed tabs after iteration completes
+  failedTabs.forEach(tabId => subscribedTabs.delete(tabId));
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {

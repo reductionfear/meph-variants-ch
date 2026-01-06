@@ -9,6 +9,12 @@ const DEFAULT_POSITION = 'w*****b-r-a8*****b-n-b8*****b-b-c8*****b-q-d8*****b-k-
     'w-p-a2*****w-p-b2*****w-p-c2*****w-p-d2*****w-p-e2*****w-p-f2*****w-p-g2*****w-p-h2*****w-r-a1*****' +
     'w-n-b1*****w-b-c1*****w-q-d1*****w-k-e1*****w-b-f1*****w-n-g1*****w-r-h1*****';
 
+// Default timing values for drop moves when config is not loaded
+const DEFAULT_THINK_TIME = 1000;
+const DEFAULT_THINK_VARIANCE = 500;
+const DEFAULT_MOVE_TIME = 500;
+const DEFAULT_MOVE_VARIANCE = 250;
+
 const LICHESS_VARIANT_MAP = {
     'standard': 'chess',
     'chess960': 'fischerandom',
@@ -249,19 +255,26 @@ function executeDropMove(dropNotation) {
     return Promise.resolve(false);
 }
 
+function getPocketSelectorForTurn(turn, orientation) {
+    // Determine which pocket belongs to the current turn's player
+    // White pieces are in bottom pocket when viewing as white, top when viewing as black
+    const isWhiteTurn = (turn === 'w');
+    const viewingAsWhite = (orientation === 'white');
+    
+    if (isWhiteTurn === viewingAsWhite) {
+        return '.pocket-bottom';
+    } else {
+        return '.pocket-top';
+    }
+}
+
 function executeLichessDropMove(role, pos) {
     return new Promise((resolve) => {
-        // Determine which pocket to use based on current turn
         const turn = getTurn();
-        const pocketSelector = (turn === 'w') ? '.pocket-bottom' : '.pocket-top';
-        
-        // Adjust based on board orientation
         const orientation = getOrientation();
-        const actualPocketSelector = (orientation === 'white') 
-            ? (turn === 'w' ? '.pocket-bottom' : '.pocket-top')
-            : (turn === 'w' ? '.pocket-top' : '.pocket-bottom');
+        const pocketSelector = getPocketSelectorForTurn(turn, orientation);
         
-        const pocket = document.querySelector(actualPocketSelector);
+        const pocket = document.querySelector(pocketSelector);
         if (!pocket) {
             console.error('[Drop] Pocket not found for current turn');
             resolve(false);
@@ -294,9 +307,9 @@ function executeLichessDropMove(role, pos) {
         // Check if config is loaded
         if (!config || !config.think_time || !config.move_time) {
             console.warn('[Drop] Config not loaded, using defaults');
-            // Use defaults if config not available
-            const thinkTime = 1000 + Math.random() * 500;
-            const moveTime = 500 + Math.random() * 250;
+            // Use default constants
+            const thinkTime = DEFAULT_THINK_TIME + Math.random() * DEFAULT_THINK_VARIANCE;
+            const moveTime = DEFAULT_MOVE_TIME + Math.random() * DEFAULT_MOVE_VARIANCE;
             
             setTimeout(() => {
                 simulateClickSquare(pocketPiece.getBoundingClientRect(), 0.5);
@@ -422,8 +435,9 @@ function scrapePosition(detectedVariant = null) {
     }
 
     if (res != null) {
-        console.log(prefix + res.replace(/[^\w-+#*@&]/g, ''));
-        return prefix + res.replace(/[^\w-+=#*@&]/g, '');
+        const sanitized = prefix + res.replace(/[^\w-+=#*@&]/g, '');
+        console.log(sanitized);
+        return sanitized;
     } else {
         return 'no';
     }
