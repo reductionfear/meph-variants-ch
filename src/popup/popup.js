@@ -65,6 +65,8 @@ document.addEventListener('DOMContentLoaded', async function () {
         autoplay: JSON.parse(localStorage.getItem('autoplay')) || false,
         puzzle_mode: JSON.parse(localStorage.getItem('puzzle_mode')) || false,
         python_autoplay_backend: JSON.parse(localStorage.getItem('python_autoplay_backend')) || false,
+        external_engine_url: JSON.parse(localStorage.getItem('external_engine_url')) || 'ws://localhost:8080',
+        auto_detect_variant: JSON.parse(localStorage.getItem('auto_detect_variant')) !== false,
         // appearance settings
         pieces: JSON.parse(localStorage.getItem('pieces')) || 'wikipedia.svg',
         board: JSON.parse(localStorage.getItem('board')) || 'brown',
@@ -114,6 +116,11 @@ document.addEventListener('DOMContentLoaded', async function () {
         } else if (response.click) {
             console.log(response);
             dispatch_click_event(response.x, response.y);
+        } else if (response.type === 'ws-message') {
+            // Forward external engine responses to engine response handler
+            on_engine_response(response.data);
+        } else if (response.type === 'ws-status') {
+            console.log('[ExtEngine] Status:', response.connected ? 'Connected' : 'Disconnected');
         }
     });
 
@@ -157,6 +164,13 @@ async function initialize_engine() {
         'lc0': 'lc0/lc0.js',
         'fairy-stockfish-14-nnue': 'fairy-stockfish-14/fsf14.js',
     }
+    
+    // Handle external WebSocket engine
+    if (config.engine === 'fairy-stockfish-external') {
+        await initialize_external_engine();
+        return;
+    }
+    
     const enginePath = `/lib/engine/${engineMap[config.engine]}`;
     const engineBasePath = enginePath.substring(0, enginePath.lastIndexOf('/'));
     if (['stockfish-16-nnue-40', 'stockfish-6'].includes(config.engine)) {
@@ -226,6 +240,39 @@ async function initialize_engine() {
         send_engine_uci('isready');
     }
     console.log('Engine ready!', engine);
+}
+
+async function initialize_external_engine() {
+    console.log('[ExtEngine] Initializing external Fairy Stockfish...');
+    
+    // Set URL and connect via background script
+    chrome.runtime.sendMessage({ type: 'ws-set-url', url: config.external_engine_url });
+    
+    return new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage({ type: 'ws-subscribe' }, (response) => {
+            if (response && response.connected) {
+                console.log('[ExtEngine] Connected to WebSocket');
+                
+                // Configure engine
+                send_external_engine_uci('uci');
+                setTimeout(() => {
+                    send_external_engine_uci(`setoption name UCI_Variant value ${config.variant}`);
+                    send_external_engine_uci('setoption name Threads value ' + config.threads);
+                    send_external_engine_uci('setoption name Hash value ' + config.memory);
+                    send_external_engine_uci('setoption name MultiPV value ' + config.multiple_lines);
+                    send_external_engine_uci('isready');
+                    resolve();
+                }, 500);
+            } else {
+                console.error('[ExtEngine] Failed to connect');
+                reject(new Error('Failed to connect to external engine'));
+            }
+        });
+    });
+}
+
+function send_external_engine_uci(command) {
+    chrome.runtime.sendMessage({ type: 'ws-send', data: command });
 }
 
 async function handleVariantChange(variant) {
@@ -309,7 +356,9 @@ async function reloadVariantNnue(variant) {
 }
 
 function send_engine_uci(message) {
-    if (config.engine === 'lc0') {
+    if (config.engine === 'fairy-stockfish-external') {
+        send_external_engine_uci(message);
+    } else if (config.engine === 'lc0') {
         engine.postMessage(message, '*');
     } else if (engine instanceof Worker) {
         engine.postMessage(message);

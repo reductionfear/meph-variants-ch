@@ -21,8 +21,9 @@
                             <option value="stockfish-11-hce">Stockfish 11 HCE</option>
                             <option value="stockfish-6">Stockfish 6</option>
                             <option value="lc0">Leela Chess Zero v0.19.1</option>
-                            <option value="fairy-stockfish-14-nnue">Fairy Stockfish 14 NNUE</option>
-                            <option value="remote">Remote Engine</option>
+                            <option value="fairy-stockfish-14-nnue">Fairy Stockfish 14 NNUE (Browser)</option>
+                            <option value="fairy-stockfish-external">Fairy Stockfish External (WebSocket)</option>
+                            <option value="remote">Remote Engine (HTTP)</option>
                         </select>
                     </label>
                 </div>
@@ -40,6 +41,27 @@
                             <option value="horde">Horde</option>
                             <option value="racingkings">Racing Kings</option>
                         </select>
+                    </label>
+                </div>
+                <div class="section hidden" id="external_engine_section">
+                    <label>
+                        <span id="external-engine-label" class="tooltipped" data-position="right"
+                              data-tooltip="WebSocket URL for external Fairy Stockfish engine. Run fairy-stockfish-server.py to start the server.">
+                            External Engine URL <i class="material-icons info-tooltip">info</i>
+                        </span>
+                        <input id="external_engine_url_input" type="text" placeholder="ws://localhost:8080">
+                    </label>
+                </div>
+                <div class="section switch hidden" id="auto_detect_variant_section">
+                    <label class="switch-label tooltipped" data-position="right"
+                           data-tooltip="Automatically detect the chess variant from the game page and configure the engine accordingly.">
+                        Auto-detect Variant <i class="material-icons info-tooltip">info</i>
+                    </label>
+                    <label>
+                        Off
+                        <input id="auto_detect_variant_checkbox" type="checkbox">
+                        <span class="lever"></span>
+                        On
                     </label>
                 </div>
                 <div class="flex-group">
