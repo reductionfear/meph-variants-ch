@@ -28,7 +28,9 @@ const webSocketProxy = new Proxy(NativeWebSocket, {
           console.log('[Hook] ← DROP received:', msg.d?.role, '@', msg.d?.uci);
         }
         
-      } catch (e) {}
+      } catch (e) {
+        // Ignore non-JSON messages (binary data, non-game messages, etc.)
+      }
     });
 
     ws.addEventListener('close', () => {

@@ -51,7 +51,9 @@ window.addEventListener('message', (event) => {
         whitePocket = { ...whitePocket, ...white };
         blackPocket = { ...blackPocket, ...black };
       }
-    } catch (e) {}
+    } catch (e) {
+      // Ignore parsing errors for non-JSON or malformed messages
+    }
   }
 });
 
@@ -318,9 +320,6 @@ function executeMove(uci) {
     const cgWrap = document.querySelector('.cg-wrap');
     if (!cgWrap) return false;
 
-    const myCol = cgWrap.classList.contains('orientation-white') ? 'w' : 'b';
-    // Validate it's our turn using existing getTurn() if available
-    
     // Check if this is a drop move (P@e4, N@f3, etc.)
     const isDrop = uci.includes('@');
     
