@@ -132,7 +132,7 @@ function detectVariantFromPage() {
 }
 
 // --- CRAZYHOUSE POCKET TRACKING ---
-// Note: whitePocket and blackPocket variables are declared at the top of the file with other globals
+// Note: whitePocket and blackPocket variables are declared at lines 6-8 with other globals
 // This section contains functions for managing Crazyhouse piece pockets
 
 function resetPockets() {
@@ -374,7 +374,9 @@ function executeMove(uci) {
     return true;
 }
 
-// Enhanced move execution with drop support (UI-based fallback)
+// UI-based drop execution via clicking pocket pieces
+// This function is called by simulateMove() for backward compatibility
+// and provides an alternative drop execution method through DOM manipulation
 function executeDropMove(dropNotation) {
     // Parse drop: P@e4 -> role: pawn, pos: e4
     const pieceChar = dropNotation[0];
