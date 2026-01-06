@@ -3,6 +3,10 @@ let config; // configuration pulled from popup
 let startPosCache; // cache of non-standard starting positions as puzzle strings (to support chess960)
 let moving = false; // whether the content-script is performing a move
 
+// Crazyhouse pocket tracking
+let whitePocket = {}; // { pawn: 0, knight: 0, bishop: 0, rook: 0, queen: 0 }
+let blackPocket = {};
+
 const LOCAL_CACHE = 'mephisto.startPosCache';
 const DEFAULT_POSITION = 'w*****b-r-a8*****b-n-b8*****b-b-c8*****b-q-d8*****b-k-e8*****b-b-f8*****b-n-g8*****' +
     'b-r-h8*****b-p-a7*****b-p-b7*****b-p-c7*****b-p-d7*****b-p-e7*****b-p-f7*****b-p-g7*****b-p-h7*****' +
@@ -123,8 +127,7 @@ function detectVariantFromPage() {
 }
 
 // --- CRAZYHOUSE POCKET TRACKING ---
-let whitePocket = {}; // { pawn: 0, knight: 0, bishop: 0, rook: 0, queen: 0 }
-let blackPocket = {};
+// whitePocket and blackPocket are declared at the top of the file
 
 function resetPockets() {
     whitePocket = { pawn: 0, knight: 0, bishop: 0, rook: 0, queen: 0 };
