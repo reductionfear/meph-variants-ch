@@ -4,7 +4,7 @@ let ws = null;
 // WebSocket URL for external Fairy Stockfish engine
 // This can be changed via ws-set-url message or configured in extension options
 // For security, only localhost connections are typically allowed
-let wsUrl = 'ws://localhost:8080/ws';
+let wsUrl = 'ws://localhost:8080';
 let isConnected = false;
 let reconnectTimer = null;
 let subscribedTabs = new Set();

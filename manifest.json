@@ -55,5 +55,11 @@
     "http://localhost:8080/*",
     "http://localhost:9090/*"
   ],
+  "web_accessible_resources": [
+    {
+      "resources": ["src/scripts/hook.js"],
+      "matches": ["*://lichess.org/*"]
+    }
+  ],
   "default_locale": "en"
 }

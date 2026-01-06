@@ -3,6 +3,10 @@ let config; // configuration pulled from popup
 let startPosCache; // cache of non-standard starting positions as puzzle strings (to support chess960)
 let moving = false; // whether the content-script is performing a move
 
+// Crazyhouse pocket tracking
+let whitePocket = {}; // { pawn: 0, knight: 0, bishop: 0, rook: 0, queen: 0 }
+let blackPocket = {};
+
 const LOCAL_CACHE = 'mephisto.startPosCache';
 const DEFAULT_POSITION = 'w*****b-r-a8*****b-n-b8*****b-b-c8*****b-q-d8*****b-k-e8*****b-b-f8*****b-n-g8*****' +
     'b-r-h8*****b-p-a7*****b-p-b7*****b-p-c7*****b-p-d7*****b-p-e7*****b-p-f7*****b-p-g7*****b-p-h7*****' +
@@ -14,6 +18,47 @@ const DEFAULT_THINK_TIME = 1000;
 const DEFAULT_THINK_VARIANCE = 500;
 const DEFAULT_MOVE_TIME = 500;
 const DEFAULT_MOVE_VARIANCE = 250;
+
+// Drop piece role mapping (UCI piece char to Lichess role name)
+const DROP_ROLE_MAP = { 'P': 'pawn', 'N': 'knight', 'B': 'bishop', 'R': 'rook', 'Q': 'queen' };
+
+// --- INJECT HOOK IMMEDIATELY ---
+// This must run before the page creates its WebSocket
+const script = document.createElement('script');
+script.src = chrome.runtime.getURL('src/scripts/hook.js');
+(document.head || document.documentElement).appendChild(script);
+script.onload = () => script.remove();
+
+// --- SOCKET MESSAGING BRIDGE ---
+let currentAck = 0;
+
+// Listen for messages forwarded by hook.js
+window.addEventListener('message', (event) => {
+  if (event.source !== window) return;
+
+  // Incoming message from Lichess Server (captured by hook.js)
+  if (event.data.type === 'LH_S_IN') {
+    try {
+      const msg = JSON.parse(event.data.payload);
+      // Update Ack/Ply so our moves are accepted
+      if (msg.t === 'move' && msg.d && typeof msg.d.ply !== 'undefined') {
+        currentAck = msg.d.ply;
+      }
+      if (msg.t === 'drop' && msg.d && typeof msg.d.ply !== 'undefined') {
+        currentAck = msg.d.ply;
+      }
+      
+      // Update pockets for Crazyhouse
+      if (msg.d && msg.d.crazyhouse && msg.d.crazyhouse.pockets) {
+        const [white, black] = msg.d.crazyhouse.pockets;
+        whitePocket = { ...whitePocket, ...white };
+        blackPocket = { ...blackPocket, ...black };
+      }
+    } catch (e) {
+      // Ignore parsing errors for non-JSON or malformed messages
+    }
+  }
+});
 
 const LICHESS_VARIANT_MAP = {
     'standard': 'chess',
@@ -87,8 +132,8 @@ function detectVariantFromPage() {
 }
 
 // --- CRAZYHOUSE POCKET TRACKING ---
-let whitePocket = {}; // { pawn: 0, knight: 0, bishop: 0, rook: 0, queen: 0 }
-let blackPocket = {};
+// Note: whitePocket and blackPocket variables are declared at lines 6-8 with other globals
+// This section contains functions for managing Crazyhouse piece pockets
 
 function resetPockets() {
     whitePocket = { pawn: 0, knight: 0, bishop: 0, rook: 0, queen: 0 };
@@ -231,12 +276,111 @@ function sendToEngine(command) {
     });
 }
 
-// Enhanced move execution with drop support
+// === PARSE ENGINE OUTPUT WITH DROP SUPPORT ===
+function parseInfoLine(text) {
+    if (!text.startsWith('info ')) return null;
+    
+    const mpv = text.match(/multipv (\d+)/);
+    const cp = text.match(/score cp (-?\d+)/);
+    const mate = text.match(/score mate (-?\d+)/);
+    const pv = text.match(/ pv (.+)$/);
+    if (!pv) return null;
+
+    let evalCp = null, evalType = 'cp', mateVal = null;
+    if (cp) {
+        evalCp = parseInt(cp[1], 10);
+    } else if (mate) {
+        mateVal = parseInt(mate[1], 10);
+        evalCp = (mateVal > 0 ? 100000 : -100000) + mateVal;
+        evalType = 'mate';
+    } else return null;
+
+    const firstMove = pv[1].trim().split(' ')[0];
+    
+    // Valid: e2e4, e7e8q (promotion), P@e5 (drop), N@f3 (drop)
+    const isRegularMove = /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(firstMove);
+    const isDropMove = /^[PNBRQ]@[a-h][1-8]$/.test(firstMove);
+    
+    if (!isRegularMove && !isDropMove) {
+        console.warn('[Engine] Invalid move format:', firstMove);
+        return null;
+    }
+
+    return {
+        multipv: mpv ? parseInt(mpv[1], 10) : 1,
+        evalType,
+        evalCp,
+        mateVal,
+        pv: pv[1].trim(),
+        firstMove: firstMove,
+        isDrop: isDropMove
+    };
+}
+
+// === MOVE EXECUTION WITH DROP SUPPORT (WebSocket-based) ===
+function executeMove(uci) {
+    if (!uci) return false;
+    
+    const cgWrap = document.querySelector('.cg-wrap');
+    if (!cgWrap) return false;
+
+    // Check if this is a drop move (P@e4, N@f3, etc.)
+    const isDrop = uci.includes('@');
+    
+    if (isDrop) {
+        // Parse drop: P@e4 -> role: pawn, pos: e4
+        const pieceChar = uci[0].toUpperCase();
+        const role = DROP_ROLE_MAP[pieceChar];
+        const pos = uci.substring(2);
+        
+        if (!role) {
+            console.error('[Exec] Invalid drop notation:', uci);
+            return false;
+        }
+        
+        console.log(`[Exec] ✅ Sending DROP: ${uci} (role: ${role}, pos: ${pos}, ack: ${currentAck})`);
+        
+        // Send drop to Lichess via hook.js
+        window.postMessage({
+            type: 'LH_S_OUT',
+            payload: { 
+                t: "drop", 
+                d: { 
+                    role: role,
+                    pos: pos,
+                    a: currentAck  // Acknowledgment number from last server message
+                } 
+            }
+        }, '*');
+        
+    } else {
+        // Regular move
+        console.log(`[Exec] ✅ Sending MOVE: ${uci} (ack: ${currentAck})`);
+        
+        window.postMessage({
+            type: 'LH_S_OUT',
+            payload: { 
+                t: "move", 
+                d: { 
+                    u: uci,                // UCI move notation (e.g., e2e4, e7e8q)
+                    a: currentAck,         // Acknowledgment number from last server message
+                    b: 0,                  // Blur (0 = not blurred, used for anti-cheat)
+                    l: 10000               // Lag compensation in milliseconds
+                } 
+            }
+        }, '*');
+    }
+    
+    return true;
+}
+
+// UI-based drop execution via clicking pocket pieces
+// This function is called by simulateMove() for backward compatibility
+// and provides an alternative drop execution method through DOM manipulation
 function executeDropMove(dropNotation) {
     // Parse drop: P@e4 -> role: pawn, pos: e4
     const pieceChar = dropNotation[0];
-    const roleMap = { 'P': 'pawn', 'N': 'knight', 'B': 'bishop', 'R': 'rook', 'Q': 'queen' };
-    const role = roleMap[pieceChar];
+    const role = DROP_ROLE_MAP[pieceChar];
     const pos = dropNotation.substring(2);
     
     if (!role) {
